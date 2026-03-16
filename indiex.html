@@ -1,0 +1,127 @@
+<div id="canvas-container" style="position: relative; width: 1200%; height:800px; background: #fafafa; border: 1px solid #d1d5db; overflow: hidden;">
+    <canvas id="whiteboard" style="display: block;"></canvas>
+    
+    <div style="position: absolute; bottom: 10px; left: 10px; display: flex; gap: 8px; background: white; padding: 10px; border-radius: 6px; border: 1px solid #ccc; z-index: 10;">
+        <input type="text" id="wordInput" placeholder="Typ een woord..." style="padding: 5px;">
+        <button id="addBtn" style="cursor:pointer; background: #a78bfa; color: white; border: none; padding: 5px 10px; border-radius: 4px;">Smijt op bord</button>
+        <button id="clearBtn" style="cursor:pointer; background: #eee; border: none; padding: 5px 10px; border-radius: 4px;">Wis alles</button>
+    </div>
+</div>
+
+<script type="module">
+    // De Firebase configuratie moet hierboven staan (zoals in de eerdere volledige code)
+    
+    const canvas = document.getElementById('whiteboard');
+    const ctx = canvas.getContext('2d');
+    const wordInput = document.getElementById('wordInput');
+    const addBtn = document.getElementById('addBtn');
+
+    let words = {}; 
+    let isDrawing = false;
+    let isDragging = false;
+    let draggedId = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    // Pas canvas grootte aan aan de container
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+
+    // --- FUNCTIES ---
+
+    // Woord toevoegen aan Firebase
+    addBtn.onclick = () => {
+        const val = wordInput.value;
+        if(val) {
+            push(ref(db, `classes/${currentClass}/board`), {
+                text: val,
+                x: Math.random() * (canvas.width - 100) + 50,
+                y: Math.random() * (canvas.height - 50) + 25,
+                type: 'text'
+            });
+            wordInput.value = '';
+        }
+    };
+
+    // Muis & Touch posities bepalen
+    const getPos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    };
+
+    // Start interactie (Tekenen of Slepen)
+    const start = (e) => {
+        const { x, y } = getPos(e);
+        lastX = x; lastY = y;
+        draggedId = null;
+
+        // Check of we op een woord klikken (hit detection)
+        for (let id in words) {
+            const w = words[id];
+            if (x > w.x && x < w.x + 100 && y > w.y - 20 && y < w.y + 10) {
+                draggedId = id;
+                isDragging = true;
+                break;
+            }
+        }
+        if (!isDragging) isDrawing = true;
+    };
+
+    // Bewegen (Update Firebase)
+    const move = (e) => {
+        const { x, y } = getPos(e);
+        if (isDragging && draggedId) {
+            update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
+        } else if (isDrawing) {
+            // Teken lokaal voor directe feedback
+            ctx.strokeStyle = "#d1d5db";
+            ctx.lineWidth = 2;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+
+            // Sla segment op in Firebase
+            push(ref(db, `classes/${currentClass}/board`), { x, y, px: lastX, py: lastY, type: 'line' });
+            lastX = x; lastY = y;
+        }
+    };
+
+    const stop = () => { isDrawing = false; isDragging = false; ctx.beginPath(); };
+
+    // Event listeners
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+    
+    // Touch support voor tablets
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); });
+    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); move(e); });
+    canvas.addEventListener('touchend', stop);
+
+    // Realtime Renderen vanuit Firebase
+    function initBoard(className) {
+        onValue(ref(db, `classes/${className}/board`), snap => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            words = snap.val() || {};
+            Object.keys(words).forEach(id => {
+                const item = words[id];
+                if(item.type === 'text') {
+                    ctx.font = "18px 'Segoe UI'";
+                    ctx.fillStyle = "#6b7280";
+                    ctx.fillText(item.text, item.x, item.y);
+                } else if(item.type === 'line') {
+                    ctx.strokeStyle = "#d1d5db";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(item.px || item.x, item.py || item.y);
+                    ctx.lineTo(item.x, item.y);
+                    ctx.stroke();
+                }
+            });
+        });
+    }
+</script>
