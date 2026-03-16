@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord: Geen Koppelingen</title>
+    <title>Stabiel Digibord</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -13,7 +13,7 @@
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
         .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; }
-        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; }
+        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; font-size: 16px; }
         #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
         #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
     </style>
@@ -67,6 +67,7 @@
         lastX = x; lastY = y;
         draggedId = null;
         isDragging = false;
+        isDrawing = false;
 
         for (let id in words) {
             const w = words[id];
@@ -77,17 +78,19 @@
 
         if (!isDragging) {
             isDrawing = true;
-            ctx.beginPath(); // Start vers pad voor lokale tekening
+            ctx.beginPath();
             ctx.moveTo(x, y);
         }
     };
 
     const move = (e) => {
+        if (!isDrawing && !isDragging) return;
         const { x, y } = getPos(e);
+
         if (isDragging && draggedId) {
             update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
         } else if (isDrawing) {
-            // Smijt segment naar de database
+            // Smijt segment naar de cloud
             push(ref(db, `classes/${currentClass}/board`), { 
                 type: 'line',
                 x: x, y: y, 
@@ -100,27 +103,27 @@
     const stop = () => {
         isDrawing = false;
         isDragging = false;
-        ctx.beginPath(); // Reset het lokale pad
+        draggedId = null;
     };
 
+    // Listeners op window om "plakken" te voorkomen
     canvas.addEventListener('mousedown', start);
     canvas.addEventListener('mousemove', move);
     window.addEventListener('mouseup', stop);
     canvas.addEventListener('touchstart', e => { e.preventDefault(); start(e); });
     canvas.addEventListener('touchmove', e => { e.preventDefault(); move(e); });
-    canvas.addEventListener('touchend', stop);
+    window.addEventListener('touchend', stop);
 
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if(val) {
             push(ref(db, `classes/${currentClass}/board`), {
-                text: val, x: 500 + (Math.random() * 100), y: 350 + (Math.random() * 100), type: 'text'
+                text: val, x: 450 + (Math.random() * 200), y: 350 + (Math.random() * 100), type: 'text'
             });
             document.getElementById('wordInput').value = '';
         }
     };
 
-    // --- DE ESSENTIËLE RENDER-FIX ---
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0,0,canvas.width,canvas.height);
         words = snap.val() || {};
@@ -132,7 +135,7 @@
                 ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
             } else if(item.type === 'line') {
-                // ELK SEGMENT WORDT NU VOLLEDIG GEÏSOLEERD GETEKEND
+                // ELK SEGMENT IS NU EEN EIGEN PAD
                 ctx.beginPath(); 
                 ctx.strokeStyle = "#d1d5db";
                 ctx.lineWidth = 3;
@@ -140,12 +143,13 @@
                 ctx.moveTo(item.px, item.py);
                 ctx.lineTo(item.x, item.y);
                 ctx.stroke();
-                ctx.closePath(); 
             }
         });
     });
 
-    document.getElementById('clearBtn').onclick = () => remove(ref(db, `classes/${currentClass}/board`));
+    document.getElementById('clearBtn').onclick = () => {
+        if(confirm("Bord wissen voor iedereen?")) remove(ref(db, `classes/${currentClass}/board`));
+    };
 </script>
 </body>
 </html>
