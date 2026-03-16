@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stabiel Digibord - Verbeterd</title>
+    <title>Stabiel Digibord - Drag, Draw & Delete</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -12,10 +12,21 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1); touch-action: none;
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+        
         .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; }
         input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; font-size: 16px; }
         #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
         #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        
+        /* De Prullenbak */
+        #trash-zone { 
+            position: absolute; bottom: 20px; right: 20px; width: 60px; height: 60px; 
+            background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center; font-size: 24px;
+            transition: all 0.2s; z-index: 10; opacity: 0.6;
+        }
+        #trash-zone.active { transform: scale(1.2); background: #f87171; opacity: 1; }
+
         #status { position: absolute; top: 10px; right: 20px; background: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; color: #666; }
     </style>
 </head>
@@ -23,12 +34,15 @@
 
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
+    
     <div class="toolbar">
         <input type="text" id="wordInput" placeholder="Woord smijten...">
         <button id="addBtn">Smijt op bord</button>
         <button id="clearBtn">Wis alles</button>
     </div>
-    <div id="status">Laden...</div>
+
+    <div id="trash-zone">🗑️</div>
+    <div id="status">Verbinden...</div>
 </div>
 
 <script type="module">
@@ -49,12 +63,13 @@
     const db = getDatabase(app);
     const canvas = document.getElementById('whiteboard');
     const ctx = canvas.getContext('2d');
+    const trashZone = document.getElementById('trash-zone');
     
     let currentClass = "Alpha";
     let words = {}; 
     let isDrawing = false, isDragging = false, draggedId = null;
     let lastX = 0, lastY = 0;
-    let offsetX = 0, offsetY = 0; // Voor soepel slepen
+    let offsetX = 0, offsetY = 0;
 
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
@@ -73,14 +88,11 @@
         isDragging = false;
         isDrawing = false;
 
-        // Check of we een tekstvak raken (we lopen de keys af)
-        // Tip: we gebruiken hier de huidige 'words' die we in de onValue bijhouden
-        for (let id in words) {
-            const w = words[id];
+        const entries = Object.entries(words).reverse();
+        for (const [id, w] of entries) {
             if (w.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'";
                 const textWidth = ctx.measureText(w.text).width;
-                // Hitbox: x tot x+breedte, y-30 tot y (omdat tekst vanaf baseline getekend wordt)
                 if (x > w.x - 10 && x < w.x + textWidth + 10 && y > w.y - 30 && y < w.y + 10) {
                     draggedId = id;
                     isDragging = true;
@@ -93,44 +105,45 @@
 
         if (!isDragging) {
             isDrawing = true;
-            lastX = x; 
-            lastY = y;
-            push(ref(db, `classes/${currentClass}/board`), { 
-                type: 'lineStart',
-                x: x, 
-                y: y
-            });
+            lastX = x; lastY = y;
+            push(ref(db, `classes/${currentClass}/board`), { type: 'lineStart', x, y });
         }
     };
 
     const move = (e) => {
         if (!isDrawing && !isDragging) return;
         if (e.type === 'touchmove') e.preventDefault();
-        
         const { x, y } = getPos(e);
 
         if (isDragging && draggedId) {
-            update(ref(db, `classes/${currentClass}/board/${draggedId}`), { 
-                x: x - offsetX, 
-                y: y - offsetY 
-            });
+            update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
+            
+            // Check of we boven de prullenbak zweven (CSS feedback)
+            const rect = trashZone.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            // Bereken cursor positie relatief t.o.v. de viewport voor de DOM check
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            if (clientX > rect.left && clientX < rect.right && clientY > rect.top && clientY < rect.bottom) {
+                trashZone.classList.add('active');
+            } else {
+                trashZone.classList.remove('active');
+            }
         } 
         else if (isDrawing) {
-            const distance = Math.hypot(x - lastX, y - lastY);
-            if (distance < 3) return; 
-            
-            push(ref(db, `classes/${currentClass}/board`), { 
-                type: 'lineTo',
-                x: x, 
-                y: y
-            });
-            
-            lastX = x;
-            lastY = y;
+            const dist = Math.hypot(x - lastX, y - lastY);
+            if (dist < 4) return;
+            push(ref(db, `classes/${currentClass}/board`), { type: 'lineTo', x, y });
+            lastX = x; lastY = y;
         }
     };
 
-    const stop = () => {
+    const stop = (e) => {
+        if (isDragging && draggedId && trashZone.classList.contains('active')) {
+            remove(ref(db, `classes/${currentClass}/board/${draggedId}`));
+        }
+        trashZone.classList.remove('active');
         isDrawing = false;
         isDragging = false;
         draggedId = null;
@@ -139,7 +152,6 @@
     canvas.addEventListener('mousedown', start);
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', stop);
-    
     canvas.addEventListener('touchstart', start, { passive: false });
     window.addEventListener('touchmove', move, { passive: false });
     window.addEventListener('touchend', stop);
@@ -147,52 +159,32 @@
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if(val) {
-            push(ref(db, `classes/${currentClass}/board`), {
-                type: 'text',
-                text: val, 
-                x: 100, 
-                y: 100
-            });
+            push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 100, y: 100 });
             document.getElementById('wordInput').value = '';
         }
     };
 
-    // De verbeterde render-loop met snap.forEach
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        words = snap.val() || {}; // Update lokale kopie voor de hitbox-check
+        words = snap.val() || {}; 
+        ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = "#4b5563"; 
         
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = "#4b5563"; 
-        
-        // Gebruik snap.forEach om chronologische volgorde te garanderen
-        snap.forEach((childSnap) => {
-            const item = childSnap.val();
-            
+        snap.forEach((child) => {
+            const item = child.val();
             if (item.type === 'text') {
-                ctx.font = "bold 22px 'Segoe UI'";
-                ctx.fillStyle = "#4b5563";
+                ctx.font = "bold 22px 'Segoe UI'"; ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
-            } 
-            else if (item.type === 'lineStart') {
-                ctx.beginPath();
-                ctx.moveTo(item.x, item.y);
-            }
-            else if (item.type === 'lineTo') {
-                ctx.lineTo(item.x, item.y);
-                ctx.stroke();
+            } else if (item.type === 'lineStart') {
+                ctx.beginPath(); ctx.moveTo(item.x, item.y);
+            } else if (item.type === 'lineTo') {
+                ctx.lineTo(item.x, item.y); ctx.stroke();
             }
         });
-        
-        document.getElementById('status').textContent = `Klasse: ${currentClass} | Items: ${snap.numChildren()}`;
+        document.getElementById('status').textContent = `Klasse: ${currentClass} | Objecten: ${snap.numChildren()}`;
     });
 
     document.getElementById('clearBtn').onclick = () => {
-        if (confirm('Weet je zeker dat je alles wilt wissen?')) {
-            remove(ref(db, `classes/${currentClass}/board`));
-        }
+        if (confirm('Alles wissen?')) remove(ref(db, `classes/${currentClass}/board`));
     };
 </script>
 </body>
