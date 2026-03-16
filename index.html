@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord: Geen Spooklijnen</title>
+    <title>Stabiel Digibord</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -13,7 +13,7 @@
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
         .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; }
-        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; }
+        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; font-size: 16px; }
         #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
         #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
     </style>
@@ -23,7 +23,7 @@
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
     <div class="toolbar">
-        <input type="text" id="wordInput" placeholder="Typ woord...">
+        <input type="text" id="wordInput" placeholder="Woord smijten...">
         <button id="addBtn">Smijt op bord</button>
         <button id="clearBtn">Wis alles</button>
     </div>
@@ -65,15 +65,12 @@
     const start = (e) => {
         const { x, y } = getPos(e);
         
-        // --- DE FIX ---
-        // We overschrijven lastX/Y direct bij de klik. 
-        // Zo kan de volgende 'move' nooit terugverwijzen naar de vorige tekening.
+        // DE ESSENTIËLE RESET: Verbeekt de verbinding met de vorige lijn
         lastX = x; 
         lastY = y;
         
         draggedId = null;
         isDragging = false;
-        isDrawing = false;
 
         for (let id in words) {
             const w = words[id];
@@ -98,13 +95,15 @@
         if (isDragging && draggedId) {
             update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
         } else if (isDrawing) {
-            // Smijt alleen het nieuwe segment naar Firebase
+            // Voorkom dat er data wordt verstuurd als de muis niet echt bewogen is
+            if (Math.abs(x - lastX) < 0.1 && Math.abs(y - lastY) < 0.1) return;
+
             push(ref(db, `classes/${currentClass}/board`), { 
                 type: 'line',
                 x: x, y: y, 
                 px: lastX, py: lastY 
             });
-            // Update lastX/Y voor het VOLGENDE segment in dezelfde lijn
+            
             lastX = x;
             lastY = y;
         }
@@ -143,10 +142,11 @@
                 ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
             } else if(item.type === 'line') {
-                ctx.beginPath(); 
+                ctx.beginPath(); // Elk segment is een nieuw pad
                 ctx.strokeStyle = "#d1d5db";
                 ctx.lineWidth = 3;
                 ctx.lineCap = "round";
+                ctx.lineJoin = "round";
                 ctx.moveTo(item.px, item.py);
                 ctx.lineTo(item.x, item.y);
                 ctx.stroke();
