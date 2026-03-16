@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stabiel Digibord - Drag, Draw & Delete</title>
+    <title>Stabiel Digibord - Volledig Dragable</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -12,13 +12,10 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1); touch-action: none;
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-        
         .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; }
         input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; font-size: 16px; }
         #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
         #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
-        
-        /* De Prullenbak */
         #trash-zone { 
             position: absolute; bottom: 20px; right: 20px; width: 60px; height: 60px; 
             background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%;
@@ -26,7 +23,6 @@
             transition: all 0.2s; z-index: 10; opacity: 0.6;
         }
         #trash-zone.active { transform: scale(1.2); background: #f87171; opacity: 1; }
-
         #status { position: absolute; top: 10px; right: 20px; background: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; color: #666; }
     </style>
 </head>
@@ -34,20 +30,18 @@
 
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
-    
     <div class="toolbar">
         <input type="text" id="wordInput" placeholder="Woord smijten...">
         <button id="addBtn">Smijt op bord</button>
         <button id="clearBtn">Wis alles</button>
     </div>
-
     <div id="trash-zone">🗑️</div>
     <div id="status">Verbinden...</div>
 </div>
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, onValue, push, remove, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, onValue, push, remove, update, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyA3_rzoZOWytlyAbYKKe_WuFlD8z2WvbX4",
@@ -66,18 +60,19 @@
     const trashZone = document.getElementById('trash-zone');
     
     let currentClass = "Alpha";
-    let words = {}; 
+    let objects = {}; 
     let isDrawing = false, isDragging = false, draggedId = null;
-    let lastX = 0, lastY = 0;
+    let currentPathId = null;
     let offsetX = 0, offsetY = 0;
 
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+        return { 
+            x: (clientX - rect.left) * (canvas.width / rect.width), 
+            y: (clientY - rect.top) * (canvas.height / rect.height) 
+        };
     };
 
     const start = (e) => {
@@ -88,25 +83,35 @@
         isDragging = false;
         isDrawing = false;
 
-        const entries = Object.entries(words).reverse();
-        for (const [id, w] of entries) {
-            if (w.type === 'text') {
+        // Check voor tekst of lijnen (pak het nieuwste object eerst)
+        const entries = Object.entries(objects).reverse();
+        for (const [id, obj] of entries) {
+            let hit = false;
+            if (obj.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'";
-                const textWidth = ctx.measureText(w.text).width;
-                if (x > w.x - 10 && x < w.x + textWidth + 10 && y > w.y - 30 && y < w.y + 10) {
-                    draggedId = id;
-                    isDragging = true;
-                    offsetX = x - w.x;
-                    offsetY = y - w.y;
-                    break;
-                }
+                const w = ctx.measureText(obj.text).width;
+                hit = x > obj.x - 10 && x < obj.x + w + 10 && y > obj.y - 30 && y < obj.y + 10;
+            } else if (obj.type === 'path' && obj.points) {
+                // Hitbox voor lijnen: klik in de buurt van het startpunt
+                hit = Math.hypot(x - obj.points[0].x, y - obj.points[0].y) < 25;
+            }
+
+            if (hit) {
+                draggedId = id;
+                isDragging = true;
+                const startX = obj.type === 'text' ? obj.x : obj.points[0].x;
+                const startY = obj.type === 'text' ? obj.y : obj.points[0].y;
+                offsetX = x - startX;
+                offsetY = y - startY;
+                break;
             }
         }
 
         if (!isDragging) {
             isDrawing = true;
-            lastX = x; lastY = y;
-            push(ref(db, `classes/${currentClass}/board`), { type: 'lineStart', x, y });
+            const newPathRef = push(ref(db, `classes/${currentClass}/board`));
+            currentPathId = newPathRef.key;
+            set(newPathRef, { type: 'path', points: [{x, y}] });
         }
     };
 
@@ -116,37 +121,40 @@
         const { x, y } = getPos(e);
 
         if (isDragging && draggedId) {
-            update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
-            
-            // Check of we boven de prullenbak zweven (CSS feedback)
-            const rect = trashZone.getBoundingClientRect();
-            const canvasRect = canvas.getBoundingClientRect();
-            // Bereken cursor positie relatief t.o.v. de viewport voor de DOM check
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-            if (clientX > rect.left && clientX < rect.right && clientY > rect.top && clientY < rect.bottom) {
-                trashZone.classList.add('active');
-            } else {
-                trashZone.classList.remove('active');
+            const obj = objects[draggedId];
+            if (obj.type === 'text') {
+                update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
+            } else if (obj.type === 'path') {
+                const dx = (x - offsetX) - obj.points[0].x;
+                const dy = (y - offsetY) - obj.points[0].y;
+                const newPoints = obj.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
+                update(ref(db, `classes/${currentClass}/board/${draggedId}`), { points: newPoints });
             }
+            
+            // Trash feedback
+            const tRect = trashZone.getBoundingClientRect();
+            const cX = e.touches ? e.touches[0].clientX : e.clientX;
+            const cY = e.touches ? e.touches[0].clientY : e.clientY;
+            trashZone.classList.toggle('active', cX > tRect.left && cX < tRect.right && cY > tRect.top && cY < tRect.bottom);
         } 
-        else if (isDrawing) {
-            const dist = Math.hypot(x - lastX, y - lastY);
-            if (dist < 4) return;
-            push(ref(db, `classes/${currentClass}/board`), { type: 'lineTo', x, y });
-            lastX = x; lastY = y;
+        else if (isDrawing && currentPathId) {
+            const path = objects[currentPathId];
+            if (path && path.points) {
+                const lastP = path.points[path.points.length - 1];
+                if (Math.hypot(x - lastP.x, y - lastP.y) > 5) {
+                    const updatedPoints = [...path.points, {x, y}];
+                    update(ref(db, `classes/${currentClass}/board/${currentPathId}`), { points: updatedPoints });
+                }
+            }
         }
     };
 
-    const stop = (e) => {
+    const stop = () => {
         if (isDragging && draggedId && trashZone.classList.contains('active')) {
             remove(ref(db, `classes/${currentClass}/board/${draggedId}`));
         }
         trashZone.classList.remove('active');
-        isDrawing = false;
-        isDragging = false;
-        draggedId = null;
+        isDrawing = false; isDragging = false; currentPathId = null; draggedId = null;
     };
 
     canvas.addEventListener('mousedown', start);
@@ -159,33 +167,40 @@
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if(val) {
-            push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 100, y: 100 });
+            push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 150, y: 150 });
             document.getElementById('wordInput').value = '';
         }
     };
 
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        words = snap.val() || {}; 
-        ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = "#4b5563"; 
+        objects = snap.val() || {};
+        
+        ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         
         snap.forEach((child) => {
-            const item = child.val();
-            if (item.type === 'text') {
+            const obj = child.val();
+            if (obj.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'"; ctx.fillStyle = "#4b5563";
-                ctx.fillText(item.text, item.x, item.y);
-            } else if (item.type === 'lineStart') {
-                ctx.beginPath(); ctx.moveTo(item.x, item.y);
-            } else if (item.type === 'lineTo') {
-                ctx.lineTo(item.x, item.y); ctx.stroke();
+                ctx.fillText(obj.text, obj.x, obj.y);
+            } else if (obj.type === 'path' && obj.points) {
+                ctx.beginPath();
+                ctx.strokeStyle = (child.key === draggedId) ? "#a78bfa" : "#4b5563"; // Kleur verandert bij slepen
+                ctx.moveTo(obj.points[0].x, obj.points[0].y);
+                obj.points.forEach(p => ctx.lineTo(p.x, p.y));
+                ctx.stroke();
+                
+                // Teken een klein sleep-bolletje aan het begin van de lijn
+                ctx.fillStyle = "#d1d5db";
+                ctx.beginPath();
+                ctx.arc(obj.points[0].x, obj.points[0].y, 5, 0, Math.PI * 2);
+                ctx.fill();
             }
         });
         document.getElementById('status').textContent = `Klasse: ${currentClass} | Objecten: ${snap.numChildren()}`;
     });
 
-    document.getElementById('clearBtn').onclick = () => {
-        if (confirm('Alles wissen?')) remove(ref(db, `classes/${currentClass}/board`));
-    };
+    document.getElementById('clearBtn').onclick = () => { if(confirm('Alles wissen?')) remove(ref(db, `classes/${currentClass}/board`)); };
 </script>
 </body>
 </html>
