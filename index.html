@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord: PenUp PenDown Fix</title>
+    <title>Digibord: Geen Spooklijnen</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -23,7 +23,7 @@
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
     <div class="toolbar">
-        <input type="text" id="wordInput" placeholder="Smijt een woord...">
+        <input type="text" id="wordInput" placeholder="Typ woord...">
         <button id="addBtn">Smijt op bord</button>
         <button id="clearBtn">Wis alles</button>
     </div>
@@ -62,23 +62,31 @@
         return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
     };
 
-    // --- PENDOWN (Start tekenen of slepen) ---
     const start = (e) => {
         const { x, y } = getPos(e);
-        lastX = x; lastY = y;
         
-        // Check hit-detection voor woorden
+        // --- DE FIX ---
+        // We overschrijven lastX/Y direct bij de klik. 
+        // Zo kan de volgende 'move' nooit terugverwijzen naar de vorige tekening.
+        lastX = x; 
+        lastY = y;
+        
         draggedId = null;
+        isDragging = false;
+        isDrawing = false;
+
         for (let id in words) {
             const w = words[id];
-            if (x > w.x - 10 && x < w.x + 140 && y > w.y - 30 && y < w.y + 10) {
-                draggedId = id; isDragging = true; break;
+            if (x > w.x - 20 && x < w.x + 150 && y > w.y - 30 && y < w.y + 10) {
+                draggedId = id; 
+                isDragging = true; 
+                break;
             }
         }
 
         if (!isDragging) {
             isDrawing = true;
-            ctx.beginPath(); // De pen raakt het papier: nieuw pad!
+            ctx.beginPath();
             ctx.moveTo(x, y);
         }
     };
@@ -90,20 +98,21 @@
         if (isDragging && draggedId) {
             update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
         } else if (isDrawing) {
-            // Sla de beweging op als een uniek segment
+            // Smijt alleen het nieuwe segment naar Firebase
             push(ref(db, `classes/${currentClass}/board`), { 
-                type: 'line', x: x, y: y, px: lastX, py: lastY 
+                type: 'line',
+                x: x, y: y, 
+                px: lastX, py: lastY 
             });
-            lastX = x; lastY = y;
+            // Update lastX/Y voor het VOLGENDE segment in dezelfde lijn
+            lastX = x;
+            lastY = y;
         }
     };
 
-    // --- PENUP (Einde actie) ---
     const stop = () => {
         isDrawing = false;
         isDragging = false;
-        draggedId = null;
-        ctx.beginPath(); // Pen van papier: verbreek het pad
     };
 
     canvas.addEventListener('mousedown', start);
@@ -113,7 +122,6 @@
     canvas.addEventListener('touchmove', e => { e.preventDefault(); move(e); });
     window.addEventListener('touchend', stop);
 
-    // --- SMIJTEN ---
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if(val) {
@@ -124,7 +132,6 @@
         }
     };
 
-    // --- RENDEREN (De penup/pendown vertaling van de database) ---
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0,0,canvas.width,canvas.height);
         words = snap.val() || {};
@@ -136,14 +143,13 @@
                 ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
             } else if(item.type === 'line') {
-                // Hier dwingen we de penup/pendown af per segment
-                ctx.beginPath(); // Pen neer op item.px
+                ctx.beginPath(); 
                 ctx.strokeStyle = "#d1d5db";
                 ctx.lineWidth = 3;
                 ctx.lineCap = "round";
                 ctx.moveTo(item.px, item.py);
-                ctx.lineTo(item.x, item.y); // Trek lijn naar item.x
-                ctx.stroke(); // Pen op van papier
+                ctx.lineTo(item.x, item.y);
+                ctx.stroke();
             }
         });
     });
