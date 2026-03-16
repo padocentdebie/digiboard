@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stabiel Digibord</title>
+    <title>Stabiel Digibord - Verbeterd</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -28,7 +28,7 @@
         <button id="addBtn">Smijt op bord</button>
         <button id="clearBtn">Wis alles</button>
     </div>
-    <div id="status">Klasse: Alpha</div>
+    <div id="status">Laden...</div>
 </div>
 
 <script type="module">
@@ -54,7 +54,7 @@
     let words = {}; 
     let isDrawing = false, isDragging = false, draggedId = null;
     let lastX = 0, lastY = 0;
-    let pendingPoints = []; // Voor het bufferen van punten
+    let offsetX = 0, offsetY = 0; // Voor soepel slepen
 
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
@@ -66,29 +66,35 @@
     };
 
     const start = (e) => {
-        e.preventDefault();
+        if (e.type === 'touchstart') e.preventDefault();
         const { x, y } = getPos(e);
         
-        // Reset alle tekenstatussen
-        lastX = x; 
-        lastY = y;
         draggedId = null;
         isDragging = false;
-        pendingPoints = [{x, y}]; // Begin met eerste punt
+        isDrawing = false;
 
-        // Check of we een tekstvak raken
+        // Check of we een tekstvak raken (we lopen de keys af)
+        // Tip: we gebruiken hier de huidige 'words' die we in de onValue bijhouden
         for (let id in words) {
             const w = words[id];
-            if (w.type === 'text' && x > w.x - 20 && x < w.x + 150 && y > w.y - 30 && y < w.y + 10) {
-                draggedId = id; 
-                isDragging = true; 
-                break;
+            if (w.type === 'text') {
+                ctx.font = "bold 22px 'Segoe UI'";
+                const textWidth = ctx.measureText(w.text).width;
+                // Hitbox: x tot x+breedte, y-30 tot y (omdat tekst vanaf baseline getekend wordt)
+                if (x > w.x - 10 && x < w.x + textWidth + 10 && y > w.y - 30 && y < w.y + 10) {
+                    draggedId = id;
+                    isDragging = true;
+                    offsetX = x - w.x;
+                    offsetY = y - w.y;
+                    break;
+                }
             }
         }
 
         if (!isDragging) {
             isDrawing = true;
-            // Push het startpunt van de lijn
+            lastX = x; 
+            lastY = y;
             push(ref(db, `classes/${currentClass}/board`), { 
                 type: 'lineStart',
                 x: x, 
@@ -99,57 +105,44 @@
 
     const move = (e) => {
         if (!isDrawing && !isDragging) return;
-        e.preventDefault();
+        if (e.type === 'touchmove') e.preventDefault();
         
         const { x, y } = getPos(e);
 
         if (isDragging && draggedId) {
-            // Update tekstpositie
-            update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
+            update(ref(db, `classes/${currentClass}/board/${draggedId}`), { 
+                x: x - offsetX, 
+                y: y - offsetY 
+            });
         } 
         else if (isDrawing) {
-            // Alleen tekenen als we echt bewegen (minimale afstand)
             const distance = Math.hypot(x - lastX, y - lastY);
-            if (distance < 2) return; // Minimale pixelafstand voor vloeiende lijnen
+            if (distance < 3) return; 
             
-            // Push lijnsegment
             push(ref(db, `classes/${currentClass}/board`), { 
                 type: 'lineTo',
                 x: x, 
-                y: y,
-                px: lastX, 
-                py: lastY
+                y: y
             });
             
             lastX = x;
             lastY = y;
-            pendingPoints.push({x, y});
         }
     };
 
-    const stop = (e) => {
-        if (e) e.preventDefault();
-        
-        if (isDrawing && pendingPoints.length > 0) {
-            // Markeer het einde van de lijn (optioneel, voor debugging)
-            console.log(`Lijn getekend met ${pendingPoints.length} punten`);
-        }
-        
+    const stop = () => {
         isDrawing = false;
         isDragging = false;
-        pendingPoints = [];
+        draggedId = null;
     };
 
-    // Event listeners met preventDefault voor touch
     canvas.addEventListener('mousedown', start);
-    canvas.addEventListener('mousemove', move);
+    window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', stop);
-    canvas.addEventListener('mouseleave', stop); // Stoppen als muis canvas verlaat
     
     canvas.addEventListener('touchstart', start, { passive: false });
-    canvas.addEventListener('touchmove', move, { passive: false });
-    canvas.addEventListener('touchend', stop);
-    canvas.addEventListener('touchcancel', stop);
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', stop);
 
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
@@ -157,52 +150,43 @@
             push(ref(db, `classes/${currentClass}/board`), {
                 type: 'text',
                 text: val, 
-                x: 500, 
-                y: 400
+                x: 100, 
+                y: 100
             });
             document.getElementById('wordInput').value = '';
         }
     };
 
-    // Tekenfunctie met verbeterde lijnweergave
+    // De verbeterde render-loop met snap.forEach
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        words = snap.val() || {};
-        
-        // Sorteer items op timestamp voor correcte tekenvolgorde
-        const items = Object.values(words);
+        words = snap.val() || {}; // Update lokale kopie voor de hitbox-check
         
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.strokeStyle = "#d1d5db";
+        ctx.strokeStyle = "#4b5563"; 
         
-        let currentPath = null;
-        
-        items.forEach(item => {
+        // Gebruik snap.forEach om chronologische volgorde te garanderen
+        snap.forEach((childSnap) => {
+            const item = childSnap.val();
+            
             if (item.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'";
                 ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
             } 
             else if (item.type === 'lineStart') {
-                // Begin een nieuwe lijn
                 ctx.beginPath();
                 ctx.moveTo(item.x, item.y);
-                currentPath = {start: {x: item.x, y: item.y}};
             }
-            else if (item.type === 'lineTo' && currentPath) {
-                // Teken lijnsegment
+            else if (item.type === 'lineTo') {
                 ctx.lineTo(item.x, item.y);
                 ctx.stroke();
-                // Begin opnieuw voor volgend segment (voorkomt verbindingen)
-                ctx.beginPath();
-                ctx.moveTo(item.x, item.y);
             }
         });
         
-        // Update status
-        document.getElementById('status').textContent = `Klasse: ${currentClass} | Items: ${Object.keys(words).length}`;
+        document.getElementById('status').textContent = `Klasse: ${currentClass} | Items: ${snap.numChildren()}`;
     });
 
     document.getElementById('clearBtn').onclick = () => {
