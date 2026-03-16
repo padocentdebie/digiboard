@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stabiel Digibord</title>
+    <title>Digibord: PenUp PenDown Fix</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -13,7 +13,7 @@
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
         .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; }
-        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; font-size: 16px; }
+        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; }
         #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
         #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
     </style>
@@ -62,23 +62,23 @@
         return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
     };
 
+    // --- PENDOWN (Start tekenen of slepen) ---
     const start = (e) => {
         const { x, y } = getPos(e);
         lastX = x; lastY = y;
+        
+        // Check hit-detection voor woorden
         draggedId = null;
-        isDragging = false;
-        isDrawing = false;
-
         for (let id in words) {
             const w = words[id];
-            if (x > w.x - 20 && x < w.x + 150 && y > w.y - 30 && y < w.y + 10) {
+            if (x > w.x - 10 && x < w.x + 140 && y > w.y - 30 && y < w.y + 10) {
                 draggedId = id; isDragging = true; break;
             }
         }
 
         if (!isDragging) {
             isDrawing = true;
-            ctx.beginPath();
+            ctx.beginPath(); // De pen raakt het papier: nieuw pad!
             ctx.moveTo(x, y);
         }
     };
@@ -90,23 +90,22 @@
         if (isDragging && draggedId) {
             update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
         } else if (isDrawing) {
-            // Smijt segment naar de cloud
+            // Sla de beweging op als een uniek segment
             push(ref(db, `classes/${currentClass}/board`), { 
-                type: 'line',
-                x: x, y: y, 
-                px: lastX, py: lastY 
+                type: 'line', x: x, y: y, px: lastX, py: lastY 
             });
             lastX = x; lastY = y;
         }
     };
 
+    // --- PENUP (Einde actie) ---
     const stop = () => {
         isDrawing = false;
         isDragging = false;
         draggedId = null;
+        ctx.beginPath(); // Pen van papier: verbreek het pad
     };
 
-    // Listeners op window om "plakken" te voorkomen
     canvas.addEventListener('mousedown', start);
     canvas.addEventListener('mousemove', move);
     window.addEventListener('mouseup', stop);
@@ -114,16 +113,18 @@
     canvas.addEventListener('touchmove', e => { e.preventDefault(); move(e); });
     window.addEventListener('touchend', stop);
 
+    // --- SMIJTEN ---
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if(val) {
             push(ref(db, `classes/${currentClass}/board`), {
-                text: val, x: 450 + (Math.random() * 200), y: 350 + (Math.random() * 100), type: 'text'
+                text: val, x: 500, y: 400, type: 'text'
             });
             document.getElementById('wordInput').value = '';
         }
     };
 
+    // --- RENDEREN (De penup/pendown vertaling van de database) ---
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0,0,canvas.width,canvas.height);
         words = snap.val() || {};
@@ -135,21 +136,19 @@
                 ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
             } else if(item.type === 'line') {
-                // ELK SEGMENT IS NU EEN EIGEN PAD
-                ctx.beginPath(); 
+                // Hier dwingen we de penup/pendown af per segment
+                ctx.beginPath(); // Pen neer op item.px
                 ctx.strokeStyle = "#d1d5db";
                 ctx.lineWidth = 3;
                 ctx.lineCap = "round";
                 ctx.moveTo(item.px, item.py);
-                ctx.lineTo(item.x, item.y);
-                ctx.stroke();
+                ctx.lineTo(item.x, item.y); // Trek lijn naar item.x
+                ctx.stroke(); // Pen op van papier
             }
         });
     });
 
-    document.getElementById('clearBtn').onclick = () => {
-        if(confirm("Bord wissen voor iedereen?")) remove(ref(db, `classes/${currentClass}/board`));
-    };
+    document.getElementById('clearBtn').onclick = () => remove(ref(db, `classes/${currentClass}/board`));
 </script>
 </body>
 </html>
