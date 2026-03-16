@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stabiel Digibord - Volledig Dragable</title>
+    <title>Digibord Pro - Tekst, Lijnen & Afbeeldingen</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -12,17 +12,18 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1); touch-action: none;
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-        .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; }
-        input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; font-size: 16px; }
-        #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; flex-wrap: wrap; max-width: 80%; }
+        input { padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; }
+        #addBtn, #addImgBtn { background: #a78bfa; color: white; border: none; padding: 8px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
+        
         #trash-zone { 
-            position: absolute; bottom: 20px; right: 20px; width: 60px; height: 60px; 
+            position: absolute; bottom: 20px; right: 20px; width: 70px; height: 70px; 
             background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center; font-size: 24px;
-            transition: all 0.2s; z-index: 10; opacity: 0.6;
+            display: flex; align-items: center; justify-content: center; font-size: 30px;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 10; opacity: 0.7;
         }
-        #trash-zone.active { transform: scale(1.2); background: #f87171; opacity: 1; }
+        #trash-zone.active { transform: scale(1.3); background: #ef4444; opacity: 1; border-style: solid; }
         #status { position: absolute; top: 10px; right: 20px; background: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; color: #666; }
     </style>
 </head>
@@ -31,12 +32,14 @@
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
     <div class="toolbar">
-        <input type="text" id="wordInput" placeholder="Woord smijten...">
-        <button id="addBtn">Smijt op bord</button>
+        <input type="text" id="wordInput" placeholder="Tekst...">
+        <button id="addBtn">Tekst</button>
+        <input type="text" id="imgInput" placeholder="URL naar afbeelding (PNG)...">
+        <button id="addImgBtn">Afbeelding</button>
         <button id="clearBtn">Wis alles</button>
     </div>
     <div id="trash-zone">🗑️</div>
-    <div id="status">Verbinden...</div>
+    <div id="status">Laden...</div>
 </div>
 
 <script type="module">
@@ -75,15 +78,21 @@
         };
     };
 
+    const drawRoundedRect = (x, y, w, h, r) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    };
+
     const start = (e) => {
         if (e.type === 'touchstart') e.preventDefault();
         const { x, y } = getPos(e);
         
-        draggedId = null;
-        isDragging = false;
-        isDrawing = false;
+        draggedId = null; isDragging = false; isDrawing = false;
 
-        // Check voor tekst of lijnen (pak het nieuwste object eerst)
         const entries = Object.entries(objects).reverse();
         for (const [id, obj] of entries) {
             let hit = false;
@@ -92,17 +101,16 @@
                 const w = ctx.measureText(obj.text).width;
                 hit = x > obj.x - 10 && x < obj.x + w + 10 && y > obj.y - 30 && y < obj.y + 10;
             } else if (obj.type === 'path' && obj.points) {
-                // Hitbox voor lijnen: klik in de buurt van het startpunt
-                hit = Math.hypot(x - obj.points[0].x, y - obj.points[0].y) < 25;
+                hit = Math.hypot(x - obj.points[0].x, y - obj.points[0].y) < 30;
+            } else if (obj.type === 'image') {
+                hit = x > obj.x && x < obj.x + obj.w && y > obj.y && y < obj.y + obj.h;
             }
 
             if (hit) {
-                draggedId = id;
-                isDragging = true;
-                const startX = obj.type === 'text' ? obj.x : obj.points[0].x;
-                const startY = obj.type === 'text' ? obj.y : obj.points[0].y;
-                offsetX = x - startX;
-                offsetY = y - startY;
+                draggedId = id; isDragging = true;
+                const startX = (obj.type === 'path') ? obj.points[0].x : obj.x;
+                const startY = (obj.type === 'path') ? obj.points[0].y : obj.y;
+                offsetX = x - startX; offsetY = y - startY;
                 break;
             }
         }
@@ -117,33 +125,30 @@
 
     const move = (e) => {
         if (!isDrawing && !isDragging) return;
-        if (e.type === 'touchmove') e.preventDefault();
         const { x, y } = getPos(e);
 
         if (isDragging && draggedId) {
             const obj = objects[draggedId];
-            if (obj.type === 'text') {
-                update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
-            } else if (obj.type === 'path') {
+            if (obj.type === 'path') {
                 const dx = (x - offsetX) - obj.points[0].x;
                 const dy = (y - offsetY) - obj.points[0].y;
                 const newPoints = obj.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
                 update(ref(db, `classes/${currentClass}/board/${draggedId}`), { points: newPoints });
+            } else {
+                update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
             }
             
-            // Trash feedback
             const tRect = trashZone.getBoundingClientRect();
-            const cX = e.touches ? e.touches[0].clientX : e.clientX;
-            const cY = e.touches ? e.touches[0].clientY : e.clientY;
-            trashZone.classList.toggle('active', cX > tRect.left && cX < tRect.right && cY > tRect.top && cY < tRect.bottom);
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            trashZone.classList.toggle('active', clientX > tRect.left && clientX < tRect.right && clientY > tRect.top && clientY < tRect.bottom);
         } 
         else if (isDrawing && currentPathId) {
             const path = objects[currentPathId];
             if (path && path.points) {
                 const lastP = path.points[path.points.length - 1];
                 if (Math.hypot(x - lastP.x, y - lastP.y) > 5) {
-                    const updatedPoints = [...path.points, {x, y}];
-                    update(ref(db, `classes/${currentClass}/board/${currentPathId}`), { points: updatedPoints });
+                    update(ref(db, `classes/${currentClass}/board/${currentPathId}`), { points: [...path.points, {x, y}] });
                 }
             }
         }
@@ -166,35 +171,42 @@
 
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
-        if(val) {
-            push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 150, y: 150 });
-            document.getElementById('wordInput').value = '';
-        }
+        if(val) { push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 200, y: 200 }); wordInput.value = ''; }
+    };
+
+    document.getElementById('addImgBtn').onclick = () => {
+        const url = document.getElementById('imgInput').value.trim();
+        if(url) { push(ref(db, `classes/${currentClass}/board`), { type: 'image', src: url, x: 300, y: 300, w: 200, h: 150 }); imgInput.value = ''; }
     };
 
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         objects = snap.val() || {};
-        
-        ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        const isTrash = trashZone.classList.contains('active');
         
         snap.forEach((child) => {
             const obj = child.val();
+            const isSel = child.key === draggedId;
+            const color = (isSel && isTrash) ? "#ef4444" : (isSel ? "#a78bfa" : "#4b5563");
+
             if (obj.type === 'text') {
-                ctx.font = "bold 22px 'Segoe UI'"; ctx.fillStyle = "#4b5563";
+                ctx.font = "bold 22px 'Segoe UI'"; ctx.fillStyle = color;
                 ctx.fillText(obj.text, obj.x, obj.y);
             } else if (obj.type === 'path' && obj.points) {
-                ctx.beginPath();
-                ctx.strokeStyle = (child.key === draggedId) ? "#a78bfa" : "#4b5563"; // Kleur verandert bij slepen
+                ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath();
                 ctx.moveTo(obj.points[0].x, obj.points[0].y);
                 obj.points.forEach(p => ctx.lineTo(p.x, p.y));
                 ctx.stroke();
-                
-                // Teken een klein sleep-bolletje aan het begin van de lijn
-                ctx.fillStyle = "#d1d5db";
-                ctx.beginPath();
-                ctx.arc(obj.points[0].x, obj.points[0].y, 5, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.fillStyle = isSel ? color : "#d1d5db"; ctx.beginPath(); ctx.arc(obj.points[0].x, obj.points[0].y, 6, 0, Math.PI * 2); ctx.fill();
+            } else if (obj.type === 'image') {
+                const img = new Image(); img.src = obj.src;
+                img.onload = () => {
+                    ctx.save();
+                    drawRoundedRect(obj.x, obj.y, obj.w, obj.h, 15);
+                    ctx.clip(); ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+                    if (isSel) { ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.stroke(); }
+                    ctx.restore();
+                };
             }
         });
         document.getElementById('status').textContent = `Klasse: ${currentClass} | Objecten: ${snap.numChildren()}`;
