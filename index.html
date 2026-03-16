@@ -3,11 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord: Samenstellingen</title>
+    <title>Digibord: Stabiele Lijnen</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
-        
-        /* Container op 95% breedte, behoudt 1200:800 ratio */
         #board-container { 
             position: relative; 
             width: 95%; 
@@ -19,37 +17,22 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             touch-action: none;
         }
-        
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-
         .toolbar { 
             position: absolute; bottom: 20px; left: 20px; 
             display: flex; gap: 10px; background: white; 
             padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; 
-            z-index: 10; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            z-index: 10;
         }
-
         input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; }
-        
-        button { 
-            padding: 10px 15px; border-radius: 4px; border: none; 
-            cursor: pointer; font-weight: bold; transition: opacity 0.2s;
-        }
-
-        #addBtn { background: #a78bfa; color: white; }
-        #clearBtn { background: #f3f4f6; color: #4b5563; }
-        button:active { opacity: 0.7; }
-        
-        #class-indicator { position: absolute; top: 20px; left: 20px; color: #9ca3af; font-size: 0.9em; }
+        #addBtn { background: #a78bfa; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
     </style>
 </head>
 <body>
 
 <div id="board-container">
-    <div id="class-indicator">Live Bord: <span id="currentClassName">Alpha</span></div>
-    
     <canvas id="whiteboard" width="1200" height="800"></canvas>
-
     <div class="toolbar">
         <input type="text" id="wordInput" placeholder="Smijt een woord...">
         <button id="addBtn">Smijt op bord</button>
@@ -76,44 +59,36 @@
     const canvas = document.getElementById('whiteboard');
     const ctx = canvas.getContext('2d');
     
-    // Klas instelling (pas dit aan indien nodig)
     let currentClass = "Alpha";
     let words = {}; 
     let isDrawing = false, isDragging = false, draggedId = null;
     let lastX = 0, lastY = 0;
 
-    // --- COÖRDINATEN LOGICA ---
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        
-        // Bereken de verhouding tussen scherm-pixels en interne 1200x800 resolutie
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
-
-        return { 
-            x: (clientX - rect.left) * scaleX, 
-            y: (clientY - rect.top) * scaleY 
-        };
+        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
     };
 
-    // --- INTERACTIE ---
     const start = (e) => {
         const { x, y } = getPos(e);
         lastX = x; lastY = y;
         draggedId = null;
+        isDragging = false;
 
-        // Check of we een woord vastpakken
         for (let id in words) {
             const w = words[id];
-            // Hitbox voor woorden (150x40px)
             if (x > w.x - 10 && x < w.x + 140 && y > w.y - 25 && y < w.y + 15) {
                 draggedId = id; isDragging = true; break;
             }
         }
+
         if (!isDragging) {
             isDrawing = true;
+            // CRUCIAAL: Start een vers pad bij elke nieuwe klik
             ctx.beginPath();
             ctx.moveTo(x, y);
         }
@@ -124,17 +99,31 @@
         if (isDragging && draggedId) {
             update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x, y });
         } else if (isDrawing) {
-            // Teken lokaal voor vloeiendheid
-            ctx.strokeStyle = "#d1d5db"; ctx.lineWidth = 3; ctx.lineCap = "round";
-            ctx.lineTo(x, y); ctx.stroke();
+            // Teken lokaal segment
+            ctx.strokeStyle = "#d1d5db";
+            ctx.lineWidth = 3;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.lineTo(x, y);
+            ctx.stroke();
             
-            // Smijt segment naar de cloud
-            push(ref(db, `classes/${currentClass}/board`), { x, y, px: lastX, py: lastY, type: 'line' });
+            // Sla segment op met start- en eindpunt
+            push(ref(db, `classes/${currentClass}/board`), { 
+                type: 'line',
+                x: x, y: y, 
+                px: lastX, py: lastY 
+            });
             lastX = x; lastY = y;
         }
     };
 
-    const stop = () => { isDrawing = false; isDragging = false; ctx.beginPath(); };
+    const stop = () => {
+        if (isDrawing) {
+            ctx.closePath(); // Sluit het huidige traject af
+        }
+        isDrawing = false;
+        isDragging = false;
+    };
 
     canvas.addEventListener('mousedown', start);
     canvas.addEventListener('mousemove', move);
@@ -143,13 +132,12 @@
     canvas.addEventListener('touchmove', e => { e.preventDefault(); move(e); });
     canvas.addEventListener('touchend', stop);
 
-    // --- SMIJT-FUNCTIE ---
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if(val) {
             push(ref(db, `classes/${currentClass}/board`), {
                 text: val,
-                x: 500 + (Math.random() * 200),
+                x: 500 + (Math.random() * 100),
                 y: 350 + (Math.random() * 100),
                 type: 'text'
             });
@@ -157,29 +145,32 @@
         }
     };
 
-    // --- LIVE RENDEREN ---
+    // --- RENDER LOGICA ---
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0,0,canvas.width,canvas.height);
         words = snap.val() || {};
+        
         Object.keys(words).forEach(id => {
             const item = words[id];
             if(item.type === 'text') {
-                ctx.font = "bold 22px 'Segoe UI'"; ctx.fillStyle = "#4b5563";
+                ctx.font = "bold 22px 'Segoe UI'";
+                ctx.fillStyle = "#4b5563";
                 ctx.fillText(item.text, item.x, item.y);
             } else if(item.type === 'line') {
-                ctx.strokeStyle = "#d1d5db"; ctx.lineWidth = 3; ctx.lineCap = "round";
+                ctx.strokeStyle = "#d1d5db";
+                ctx.lineWidth = 3;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                // Teken alleen het specifieke segment uit de database
                 ctx.beginPath();
-                ctx.moveTo(item.px || item.x, item.py || item.y);
+                ctx.moveTo(item.px, item.py);
                 ctx.lineTo(item.x, item.y);
                 ctx.stroke();
             }
         });
     });
 
-    document.getElementById('clearBtn').onclick = () => {
-        if(confirm("Bord wissen voor iedereen?")) remove(ref(db, `classes/${currentClass}/board`));
-    };
+    document.getElementById('clearBtn').onclick = () => remove(ref(db, `classes/${currentClass}/board`));
 </script>
-
 </body>
 </html>
