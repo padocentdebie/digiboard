@@ -3,54 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord Pro - Tekst & Zinsbouw</title>
+    <title>Digibord Pro - Live Sync</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
-            position: relative; width: 95%; max-width: 1200px; aspect-ratio: 12 / 8;
-            background: #fafafa; margin: 20px auto; border: 1px solid #d1d5db; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1); touch-action: none;
+            position: relative; width: 95vw; height: 70vh; 
+            background: #ffffff; margin: 20px auto; border: 2px solid #d1d5db; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1); touch-action: none; border-radius: 8px;
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+        
         .toolbar { 
-            position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; 
-            background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; 
-            z-index: 10; flex-wrap: wrap; max-width: 80%; 
+            display: flex; gap: 10px; justify-content: center; padding: 15px; 
+            background: #ffffff; border-top: 1px solid #ddd; position: fixed; bottom: 0; width: 100%; z-index: 100;
         }
-        input { padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; min-width: 150px; }
         
-        /* Knoppen Styling */
-        .btn { padding: 8px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; border: none; transition: 0.2s; }
-        #addBtn { background: #003082; color: white; } /* Politie Blauw */
-        #addImgBtn { background: #a78bfa; color: white; }
-        #clearBtn { background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db; }
-        #clearBtn:hover { background: #fee2e2; color: #d32f2f; }
+        input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 250px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; }
         
-        #trash-zone { 
-            position: absolute; bottom: 20px; right: 20px; width: 70px; height: 70px; 
-            background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center; font-size: 30px;
-            transition: all 0.2s; z-index: 10; opacity: 0.7;
-        }
-        #trash-zone.active { transform: scale(1.3); background: #ef4444; opacity: 1; border-style: solid; }
-        #status { position: absolute; top: 10px; right: 20px; background: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; color: #666; border: 1px solid #eee; }
+        #addBtn { background: #003082; }
+        #clearBtn { background: #d32f2f; }
+        #addBtn:hover { background: #00205b; }
+        #clearBtn:hover { background: #a12323; }
+
+        #status { position: absolute; top: 10px; right: 20px; background: rgba(255,255,255,0.9); padding: 5px 15px; border-radius: 20px; font-size: 12px; border: 1px solid #ddd; }
+        #trash-zone { position: absolute; top: 10px; left: 20px; width: 50px; height: 50px; background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; opacity: 0.6; }
+        #trash-zone.active { transform: scale(1.2); background: #ef4444; opacity: 1; }
     </style>
 </head>
 <body>
 
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
-    
-    <div class="toolbar">
-        <input type="text" id="wordInput" placeholder="Typ een woord of zinsdeel...">
-        <button id="addBtn" class="btn">Voeg Tekst Toe</button>
-        <input type="text" id="imgInput" placeholder="URL naar afbeelding...">
-        <button id="addImgBtn" class="btn">Afbeelding</button>
-        <button id="clearBtn" class="btn">Wis alles</button>
-    </div>
-
+    <div id="status">Status: Initialiseren...</div>
     <div id="trash-zone">🗑️</div>
-    <div id="status">Verbinden met database...</div>
+</div>
+
+<div class="toolbar">
+    <input type="text" id="wordInput" placeholder="Typ tekst om toe te voegen...">
+    <button id="addBtn" class="btn">Voeg Tekst Toe</button>
+    <button id="clearBtn" class="btn">Wis Bord</button>
 </div>
 
 <script type="module">
@@ -71,157 +63,119 @@
     const db = getDatabase(app);
     const canvas = document.getElementById('whiteboard');
     const ctx = canvas.getContext('2d');
-    const trashZone = document.getElementById('trash-zone');
     const statusLabel = document.getElementById('status');
-    
-    let currentClass = "Alpha";
-    let objects = {}; 
-    let isDrawing = false, isDragging = false, draggedId = null;
-    let currentPathId = null;
-    let offsetX = 0, offsetY = 0;
+    const trashZone = document.getElementById('trash-zone');
 
+    let objects = {};
+    let isDragging = false;
+    let draggedId = null;
+    let offsetX = 0, offsetY = 0;
+    const currentClass = "Alpha";
+
+    // Positie berekening
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return { 
-            x: (clientX - rect.left) * (canvas.width / rect.width), 
-            y: (clientY - rect.top) * (canvas.height / rect.height) 
+        return {
+            x: (clientX - rect.left) * (canvas.width / rect.width),
+            y: (clientY - rect.top) * (canvas.height / rect.height)
         };
     };
 
-    const start = (e) => {
-        if (e.type === 'touchstart') e.preventDefault();
+    // Interactie Start
+    canvas.addEventListener('mousedown', (e) => {
         const { x, y } = getPos(e);
-        draggedId = null; isDragging = false; isDrawing = false;
-
         const entries = Object.entries(objects).reverse();
+        
         for (const [id, obj] of entries) {
-            let hit = false;
             if (obj.type === 'text') {
-                ctx.font = "bold 22px 'Segoe UI'";
+                ctx.font = "bold 24px Arial";
                 const w = ctx.measureText(obj.text).width;
-                hit = x > obj.x - 10 && x < obj.x + w + 10 && y > obj.y - 30 && y < obj.y + 10;
-            } else if (obj.type === 'path') {
-                hit = Math.hypot(x - obj.points[0].x, y - obj.points[0].y) < 30;
-            } else if (obj.type === 'image') {
-                hit = x > obj.x && x < obj.x + obj.w && y > obj.y && y < obj.y + obj.h;
-            }
-
-            if (hit) {
-                draggedId = id; isDragging = true;
-                const startX = (obj.type === 'path') ? obj.points[0].x : obj.x;
-                const startY = (obj.type === 'path') ? obj.points[0].y : obj.y;
-                offsetX = x - startX; offsetY = y - startY;
-                break;
-            }
-        }
-
-        if (!isDragging) {
-            isDrawing = true;
-            const newPathRef = push(ref(db, `classes/${currentClass}/board`));
-            currentPathId = newPathRef.key;
-            set(newPathRef, { type: 'path', points: [{x, y}] });
-        }
-    };
-
-    const move = (e) => {
-        if (!isDrawing && !isDragging) return;
-        const { x, y } = getPos(e);
-
-        if (isDragging && draggedId) {
-            const obj = objects[draggedId];
-            if (obj.type === 'path') {
-                const dx = (x - offsetX) - obj.points[0].x;
-                const dy = (y - offsetY) - obj.points[0].y;
-                const newPoints = obj.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
-                update(ref(db, `classes/${currentClass}/board/${draggedId}`), { points: newPoints });
-            } else {
-                update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
-            }
-            
-            const tRect = trashZone.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            trashZone.classList.toggle('active', clientX > tRect.left && clientX < tRect.right && clientY > tRect.top && clientY < tRect.bottom);
-        } 
-        else if (isDrawing && currentPathId) {
-            const path = objects[currentPathId];
-            if (path && path.points) {
-                const lastP = path.points[path.points.length - 1];
-                if (Math.hypot(x - lastP.x, y - lastP.y) > 5) {
-                    update(ref(db, `classes/${currentClass}/board/${currentPathId}`), { points: [...path.points, {x, y}] });
+                if (x > obj.x && x < obj.x + w && y > obj.y - 24 && y < obj.y) {
+                    draggedId = id;
+                    isDragging = true;
+                    offsetX = x - obj.x;
+                    offsetY = y - obj.y;
+                    return;
                 }
             }
         }
-    };
+    });
 
-    const stop = () => {
+    // Bewegen
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging || !draggedId) return;
+        const { x, y } = getPos(e);
+        
+        update(ref(db, `classes/${currentClass}/board/${draggedId}`), {
+            x: x - offsetX,
+            y: y - offsetY
+        });
+
+        // Prullenbak check
+        const tRect = trashZone.getBoundingClientRect();
+        const clientX = e.clientX;
+        const clientY = e.clientY;
+        trashZone.classList.toggle('active', clientX > tRect.left && clientX < tRect.right && clientY > tRect.top && clientY < tRect.bottom);
+    });
+
+    // Loslaten
+    window.addEventListener('mouseup', () => {
         if (isDragging && draggedId && trashZone.classList.contains('active')) {
             remove(ref(db, `classes/${currentClass}/board/${draggedId}`));
         }
+        isDragging = false;
+        draggedId = null;
         trashZone.classList.remove('active');
-        isDrawing = false; isDragging = false; currentPathId = null; draggedId = null;
-    };
+    });
 
-    // Event Listeners
-    canvas.addEventListener('mousedown', start);
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop);
-    canvas.addEventListener('touchstart', start, { passive: false });
-    window.addEventListener('touchmove', move, { passive: false });
-    window.addEventListener('touchend', stop);
-
-    // Tekst toevoegen (Verbeterd)
+    // Tekst Toevoegen
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
-        if(val) {
-            push(ref(db, `classes/${currentClass}/board`), { 
-                type: 'text', text: val, x: 100, y: 100 
+        if (val) {
+            push(ref(db, `classes/${currentClass}/board`), {
+                type: 'text',
+                text: val,
+                x: 150,
+                y: 150
             });
             document.getElementById('wordInput').value = '';
         }
     };
 
-    // Resetknop (Verbeterd)
+    // Reset Bord
     document.getElementById('clearBtn').onclick = () => {
-        if(confirm('Weet je zeker dat je het hele bord wilt wissen?')) {
+        if (confirm("Hele bord wissen voor iedereen?")) {
             remove(ref(db, `classes/${currentClass}/board`));
         }
     };
 
-    // Afbeelding toevoegen
-    document.getElementById('addImgBtn').onclick = () => {
-        const url = document.getElementById('imgInput').value.trim();
-        if(url) { push(ref(db, `classes/${currentClass}/board`), { type: 'image', src: url, x: 200, y: 200, w: 200, h: 150 }); imgInput.value = ''; }
-    };
-
-    // Tekenen en Sync
-    onValue(ref(db, `classes/${currentClass}/board`), snap => {
+    // Live Tekenen
+    onValue(ref(db, `classes/${currentClass}/board`), (snapshot) => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        objects = snap.val() || {};
-        statusLabel.textContent = `Klas: ${currentClass} | Items: ${snap.numChildren()}`;
+        objects = snapshot.val() || {};
+        statusLabel.innerText = `Verbonden | Items: ${snapshot.numChildren()}`;
 
-        snap.forEach((child) => {
+        snapshot.forEach((child) => {
             const obj = child.val();
-            const isSel = child.key === draggedId;
-            const color = isSel ? "#003082" : "#4b5563";
+            const isSelected = child.key === draggedId;
 
             if (obj.type === 'text') {
-                ctx.font = "bold 22px 'Segoe UI'"; 
-                ctx.fillStyle = color;
+                ctx.font = "bold 24px Arial";
+                ctx.fillStyle = isSelected ? "#003082" : "#333";
                 ctx.fillText(obj.text, obj.x, obj.y);
-            } else if (obj.type === 'path' && obj.points) {
-                ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath();
-                ctx.moveTo(obj.points[0].x, obj.points[0].y);
-                obj.points.forEach(p => ctx.lineTo(p.x, p.y));
-                ctx.stroke();
-            } else if (obj.type === 'image') {
-                const img = new Image(); img.src = obj.src;
-                img.onload = () => ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+                
+                if (isSelected) {
+                    ctx.strokeStyle = "#003082";
+                    ctx.lineWidth = 1;
+                    const w = ctx.measureText(obj.text).width;
+                    ctx.strokeRect(obj.x - 5, obj.y - 30, w + 10, 40);
+                }
             }
         });
     });
+
 </script>
 </body>
 </html>
