@@ -32,8 +32,8 @@
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
     <div class="toolbar">
-        <input type="text" id="wordInput" placeholder="Tekst...">
-        <button id="addBtn">Tekst</button>
+        <input type="text" id="wordInput" placeholder="Typ je tekst hier...">
+        <button id="addBtn">Voeg Tekst Toe</button>
         <input type="text" id="imgInput" placeholder="URL naar afbeelding (PNG)...">
         <button id="addImgBtn">Afbeelding</button>
         <button id="clearBtn">Wis alles</button>
@@ -99,6 +99,7 @@
             if (obj.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'";
                 const w = ctx.measureText(obj.text).width;
+                // Hitbox voor tekst (ruimer om makkelijk vast te pakken)
                 hit = x > obj.x - 10 && x < obj.x + w + 10 && y > obj.y - 30 && y < obj.y + 10;
             } else if (obj.type === 'path' && obj.points) {
                 hit = Math.hypot(x - obj.points[0].x, y - obj.points[0].y) < 30;
@@ -169,9 +170,18 @@
     window.addEventListener('touchmove', move, { passive: false });
     window.addEventListener('touchend', stop);
 
+    // DE NIEUWE LOGICA VOOR TEKST INVOER
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
-        if(val) { push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 200, y: 200 }); wordInput.value = ''; }
+        if(val) { 
+            push(ref(db, `classes/${currentClass}/board`), { 
+                type: 'text', 
+                text: val, 
+                x: 100, // Standaard startpositie
+                y: 100 
+            }); 
+            document.getElementById('wordInput').value = ''; 
+        }
     };
 
     document.getElementById('addImgBtn').onclick = () => {
@@ -190,8 +200,15 @@
             const color = (isSel && isTrash) ? "#ef4444" : (isSel ? "#a78bfa" : "#4b5563");
 
             if (obj.type === 'text') {
-                ctx.font = "bold 22px 'Segoe UI'"; ctx.fillStyle = color;
+                ctx.font = "bold 22px 'Segoe UI'"; 
+                ctx.fillStyle = color;
                 ctx.fillText(obj.text, obj.x, obj.y);
+                // Optioneel: toon selectie-indicator rond tekst
+                if(isSel) {
+                   ctx.strokeStyle = color; ctx.lineWidth = 1;
+                   const w = ctx.measureText(obj.text).width;
+                   ctx.strokeRect(obj.x - 5, obj.y - 25, w + 10, 30);
+                }
             } else if (obj.type === 'path' && obj.points) {
                 ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath();
                 ctx.moveTo(obj.points[0].x, obj.points[0].y);
