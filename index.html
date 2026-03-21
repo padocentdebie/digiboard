@@ -2,47 +2,43 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord Pro - Zinsbouw & Tekenen</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Digibord Pro - Touch & Multi-user</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; position: fixed; width: 100%; }
         
-        /* Het bord */
         #board-container { 
-            position: relative; width: 95vw; height: 75vh; 
-            background: #ffffff; margin: 15px auto; border: 2px solid #003082; 
-            border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.15); touch-action: none;
+            position: relative; width: 96vw; height: 72vh; 
+            background: #ffffff; margin: 10px auto; border: 2px solid #003082; 
+            border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+            touch-action: none; /* Cruciaal: stopt standaard browser scroll gedrag */
         }
-        canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+        canvas { width: 100%; height: 100%; display: block; cursor: crosshair; border-radius: 10px; }
 
-        /* Toolbar onderaan */
         .toolbar { 
             position: fixed; bottom: 0; width: 100%; background: #ffffff; 
-            padding: 20px; display: flex; gap: 12px; justify-content: center;
-            border-top: 2px solid #ddd; z-index: 100; box-shadow: 0 -5px 15px rgba(0,0,0,0.05);
+            padding: 15px; display: flex; gap: 10px; justify-content: center; align-items: center;
+            border-top: 2px solid #ddd; z-index: 100; flex-wrap: wrap;
         }
         
-        input { padding: 12px; width: 300px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        input { padding: 12px; width: 200px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
         
-        .btn { padding: 12px 25px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; transition: 0.2s; }
-        #addBtn { background: #003082; } /* Politie blauw */
+        .btn { padding: 12px 20px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; color: white; font-size: 14px; }
+        #addBtn { background: #003082; }
         #clearBtn { background: #d32f2f; }
-        #addBtn:hover { background: #001f57; }
-        #clearBtn:hover { background: #a12323; }
 
-        /* Status & Prullenbak */
         #status { 
-            position: absolute; top: 15px; right: 20px; padding: 6px 15px; 
-            border-radius: 20px; font-size: 12px; font-weight: bold;
-            background: #ffebeb; color: #d32f2f; border: 1px solid #d32f2f;
+            position: absolute; top: 10px; right: 15px; padding: 5px 12px; 
+            border-radius: 20px; font-size: 11px; font-weight: bold;
+            background: #eee; border: 1px solid #ccc; z-index: 10;
         }
-        #status.online { background: #ebffed; color: #2e7d32; border: 1px solid #2e7d32; }
+        #status.online { background: #ebffed; color: #2e7d32; border-color: #2e7d32; }
 
         #trash-zone { 
-            position: absolute; top: 15px; left: 20px; width: 60px; height: 60px; 
+            position: absolute; top: 10px; left: 15px; width: 55px; height: 55px; 
             background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%; 
-            display: flex; align-items: center; justify-content: center; font-size: 28px; 
-            opacity: 0.5; transition: 0.3s;
+            display: flex; align-items: center; justify-content: center; font-size: 24px; 
+            opacity: 0.6; transition: 0.2s; z-index: 10;
         }
         #trash-zone.active { transform: scale(1.2); background: #ef4444; opacity: 1; border-style: solid; }
     </style>
@@ -51,21 +47,20 @@
 
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
-    <div id="status">Status: Verbinden...</div>
+    <div id="status">Status: Laden...</div>
     <div id="trash-zone">🗑️</div>
 </div>
 
 <div class="toolbar">
-    <input type="text" id="wordInput" placeholder="Typ tekst of zinsdeel...">
-    <button id="addBtn" class="btn">Voeg Tekst Toe</button>
-    <button id="clearBtn" class="btn">Wis Hele Bord</button>
+    <input type="text" id="wordInput" placeholder="Woord invoeren...">
+    <button id="addBtn" class="btn">Toevoegen</button>
+    <button id="clearBtn" class="btn">Wis Bord</button>
 </div>
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, onValue, push, remove, update, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // JOUW SPECIFIEKE DATABASE CONFIGURATIE
     const firebaseConfig = {
         apiKey: "AIzaSyA3_rzoZOWytlyAbYKKe_WuFlD8z2WvbX4",
         authDomain: "aangifteq2les1.firebaseapp.com",
@@ -85,74 +80,59 @@
     const currentClass = "Alpha";
 
     let objects = {};
-    let isDrawing = false;
-    let isDragging = false;
-    let draggedId = null;
-    let currentPathId = null;
+    let isDrawing = false, isDragging = false;
+    let draggedId = null, currentPathId = null;
     let offsetX = 0, offsetY = 0;
 
-    // --- VERBINDINGS CHECK ---
+    // Status sync
     onValue(ref(db, ".info/connected"), (snap) => {
-        if (snap.val() === true) {
-            statusLabel.innerText = "● Systeem Online";
-            statusLabel.classList.add('online');
-        } else {
-            statusLabel.innerText = "○ Offline / Verbinden...";
-            statusLabel.classList.remove('online');
-        }
+        if (snap.val()) { statusLabel.innerText = "● LIVE"; statusLabel.classList.add('online'); }
     });
 
+    // Universele positie berekening (Muis & Touch)
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         return {
             x: (clientX - rect.left) * (canvas.width / rect.width),
-            y: (clientY - rect.top) * (canvas.height / rect.height)
+            y: (clientY - rect.top) * (canvas.height / rect.height),
+            rawX: clientX,
+            rawY: clientY
         };
     };
 
-    // --- START ACTIE ---
-    canvas.addEventListener('mousedown', (e) => {
+    const startAction = (e) => {
         const { x, y } = getPos(e);
-        draggedId = null; 
-        isDragging = false;
+        draggedId = null; isDragging = false;
 
-        // Check of we een tekst raken
         const entries = Object.entries(objects).reverse();
         for (const [id, obj] of entries) {
             if (obj.type === 'text') {
                 ctx.font = "bold 24px Arial";
                 const w = ctx.measureText(obj.text).width;
-                if (x > obj.x - 5 && x < obj.x + w + 5 && y > obj.y - 30 && y < obj.y + 10) {
-                    draggedId = id;
-                    isDragging = true;
-                    offsetX = x - obj.x;
-                    offsetY = y - obj.y;
+                if (x > obj.x - 10 && x < obj.x + w + 10 && y > obj.y - 35 && y < obj.y + 15) {
+                    draggedId = id; isDragging = true;
+                    offsetX = x - obj.x; offsetY = y - obj.y;
                     return;
                 }
             }
         }
-
-        // Als geen tekst geraakt: start tekenen
         isDrawing = true;
         const newPathRef = push(ref(db, `classes/${currentClass}/board`));
         currentPathId = newPathRef.key;
         set(newPathRef, { type: 'path', points: [{x, y}] });
-    });
+    };
 
-    // --- BEWEGEN ---
-    window.addEventListener('mousemove', (e) => {
-        const { x, y } = getPos(e);
+    const moveAction = (e) => {
+        if (!isDragging && !isDrawing) return;
+        const { x, y, rawX, rawY } = getPos(e);
 
         if (isDragging && draggedId) {
             update(ref(db, `classes/${currentClass}/board/${draggedId}`), { x: x - offsetX, y: y - offsetY });
-            
-            // Prullenbak feedback
             const tRect = trashZone.getBoundingClientRect();
-            trashZone.classList.toggle('active', e.clientX > tRect.left && e.clientX < tRect.right && e.clientY > tRect.top && e.clientY < tRect.bottom);
-        } 
-        else if (isDrawing && currentPathId) {
+            trashZone.classList.toggle('active', rawX > tRect.left && rawX < tRect.right && rawY > tRect.top && rawY < tRect.bottom);
+        } else if (isDrawing && currentPathId) {
             const path = objects[currentPathId];
             if (path && path.points) {
                 const lastP = path.points[path.points.length - 1];
@@ -163,60 +143,54 @@
                 }
             }
         }
-    });
+    };
 
-    // --- STOP ACTIE ---
-    window.addEventListener('mouseup', (e) => {
+    const stopAction = () => {
         if (isDragging && draggedId && trashZone.classList.contains('active')) {
             remove(ref(db, `classes/${currentClass}/board/${draggedId}`));
         }
-        isDrawing = false;
-        isDragging = false;
-        draggedId = null;
-        currentPathId = null;
+        isDrawing = isDragging = false;
+        draggedId = currentPathId = null;
         trashZone.classList.remove('active');
-    });
+    };
 
-    // --- KNOPPEN ---
+    // Event Listeners voor Muis
+    canvas.addEventListener('mousedown', startAction);
+    window.addEventListener('mousemove', moveAction);
+    window.addEventListener('mouseup', stopAction);
+
+    // Event Listeners voor Touch (Mobiel/Tablet)
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startAction(e); }, { passive: false });
+    window.addEventListener('touchmove', (e) => { e.preventDefault(); moveAction(e); }, { passive: false });
+    window.addEventListener('touchend', stopAction);
+
+    // Knoppen
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if (val) {
-            push(ref(db, `classes/${currentClass}/board`), {
-                type: 'text', text: val, x: 150, y: 150
-            });
+            push(ref(db, `classes/${currentClass}/board`), { type: 'text', text: val, x: 150, y: 150 });
             document.getElementById('wordInput').value = '';
         }
     };
 
     document.getElementById('clearBtn').onclick = () => {
-        if (confirm("Hele bord wissen voor alle studenten?")) {
-            remove(ref(db, `classes/${currentClass}/board`));
-        }
+        if (confirm("Hele bord wissen?")) remove(ref(db, `classes/${currentClass}/board`));
     };
 
-    // --- SYNC & RENDER ---
-    onValue(ref(db, `classes/${currentClass}/board`), (snapshot) => {
+    // Renderen
+    onValue(ref(db, `classes/${currentClass}/board`), (snap) => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        objects = snapshot.val() || {};
-        
-        snapshot.forEach((child) => {
+        objects = snap.val() || {};
+        snap.forEach((child) => {
             const obj = child.val();
-            const isSelected = child.key === draggedId;
-
+            const isSel = child.key === draggedId;
             if (obj.type === 'text') {
                 ctx.font = "bold 24px Arial";
-                ctx.fillStyle = isSelected ? "#003082" : "#333";
+                ctx.fillStyle = isSel ? "#003082" : "#333";
                 ctx.fillText(obj.text, obj.x, obj.y);
-                if (isSelected) {
-                    ctx.strokeStyle = "#003082";
-                    ctx.strokeRect(obj.x - 5, obj.y - 30, ctx.measureText(obj.text).width + 10, 40);
-                }
+                if (isSel) ctx.strokeRect(obj.x - 5, obj.y - 30, ctx.measureText(obj.text).width + 10, 40);
             } else if (obj.type === 'path' && obj.points) {
-                ctx.strokeStyle = "#4b5563";
-                ctx.lineWidth = 3;
-                ctx.lineCap = "round";
-                ctx.lineJoin = "round";
-                ctx.beginPath();
+                ctx.strokeStyle = "#4b5563"; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.beginPath();
                 ctx.moveTo(obj.points[0].x, obj.points[0].y);
                 obj.points.forEach(p => ctx.lineTo(p.x, p.y));
                 ctx.stroke();
