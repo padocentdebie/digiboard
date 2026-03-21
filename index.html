@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord Pro - Tekst, Lijnen & Afbeeldingen</title>
+    <title>Digibord Pro - Tekst & Zinsbouw</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
@@ -12,34 +12,45 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.1); touch-action: none;
         }
         canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-        .toolbar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; z-index: 10; flex-wrap: wrap; max-width: 80%; }
-        input { padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; }
-        #addBtn, #addImgBtn { background: #a78bfa; color: white; border: none; padding: 8px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        #clearBtn { background: #f3f4f6; color: #4b5563; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
+        .toolbar { 
+            position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; 
+            background: white; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; 
+            z-index: 10; flex-wrap: wrap; max-width: 80%; 
+        }
+        input { padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; min-width: 150px; }
+        
+        /* Knoppen Styling */
+        .btn { padding: 8px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; border: none; transition: 0.2s; }
+        #addBtn { background: #003082; color: white; } /* Politie Blauw */
+        #addImgBtn { background: #a78bfa; color: white; }
+        #clearBtn { background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db; }
+        #clearBtn:hover { background: #fee2e2; color: #d32f2f; }
         
         #trash-zone { 
             position: absolute; bottom: 20px; right: 20px; width: 70px; height: 70px; 
             background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%;
             display: flex; align-items: center; justify-content: center; font-size: 30px;
-            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 10; opacity: 0.7;
+            transition: all 0.2s; z-index: 10; opacity: 0.7;
         }
         #trash-zone.active { transform: scale(1.3); background: #ef4444; opacity: 1; border-style: solid; }
-        #status { position: absolute; top: 10px; right: 20px; background: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; color: #666; }
+        #status { position: absolute; top: 10px; right: 20px; background: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; color: #666; border: 1px solid #eee; }
     </style>
 </head>
 <body>
 
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
+    
     <div class="toolbar">
-        <input type="text" id="wordInput" placeholder="Typ je tekst hier...">
-        <button id="addBtn">Voeg Tekst Toe</button>
-        <input type="text" id="imgInput" placeholder="URL naar afbeelding (PNG)...">
-        <button id="addImgBtn">Afbeelding</button>
-        <button id="clearBtn">Wis alles</button>
+        <input type="text" id="wordInput" placeholder="Typ een woord of zinsdeel...">
+        <button id="addBtn" class="btn">Voeg Tekst Toe</button>
+        <input type="text" id="imgInput" placeholder="URL naar afbeelding...">
+        <button id="addImgBtn" class="btn">Afbeelding</button>
+        <button id="clearBtn" class="btn">Wis alles</button>
     </div>
+
     <div id="trash-zone">🗑️</div>
-    <div id="status">Laden...</div>
+    <div id="status">Verbinden met database...</div>
 </div>
 
 <script type="module">
@@ -61,6 +72,7 @@
     const canvas = document.getElementById('whiteboard');
     const ctx = canvas.getContext('2d');
     const trashZone = document.getElementById('trash-zone');
+    const statusLabel = document.getElementById('status');
     
     let currentClass = "Alpha";
     let objects = {}; 
@@ -78,19 +90,9 @@
         };
     };
 
-    const drawRoundedRect = (x, y, w, h, r) => {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-    };
-
     const start = (e) => {
         if (e.type === 'touchstart') e.preventDefault();
         const { x, y } = getPos(e);
-        
         draggedId = null; isDragging = false; isDrawing = false;
 
         const entries = Object.entries(objects).reverse();
@@ -99,9 +101,8 @@
             if (obj.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'";
                 const w = ctx.measureText(obj.text).width;
-                // Hitbox voor tekst (ruimer om makkelijk vast te pakken)
                 hit = x > obj.x - 10 && x < obj.x + w + 10 && y > obj.y - 30 && y < obj.y + 10;
-            } else if (obj.type === 'path' && obj.points) {
+            } else if (obj.type === 'path') {
                 hit = Math.hypot(x - obj.points[0].x, y - obj.points[0].y) < 30;
             } else if (obj.type === 'image') {
                 hit = x > obj.x && x < obj.x + obj.w && y > obj.y && y < obj.y + obj.h;
@@ -163,6 +164,7 @@
         isDrawing = false; isDragging = false; currentPathId = null; draggedId = null;
     };
 
+    // Event Listeners
     canvas.addEventListener('mousedown', start);
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', stop);
@@ -170,66 +172,56 @@
     window.addEventListener('touchmove', move, { passive: false });
     window.addEventListener('touchend', stop);
 
-    // DE NIEUWE LOGICA VOOR TEKST INVOER
+    // Tekst toevoegen (Verbeterd)
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
-        if(val) { 
+        if(val) {
             push(ref(db, `classes/${currentClass}/board`), { 
-                type: 'text', 
-                text: val, 
-                x: 100, // Standaard startpositie
-                y: 100 
-            }); 
-            document.getElementById('wordInput').value = ''; 
+                type: 'text', text: val, x: 100, y: 100 
+            });
+            document.getElementById('wordInput').value = '';
         }
     };
 
-    document.getElementById('addImgBtn').onclick = () => {
-        const url = document.getElementById('imgInput').value.trim();
-        if(url) { push(ref(db, `classes/${currentClass}/board`), { type: 'image', src: url, x: 300, y: 300, w: 200, h: 150 }); imgInput.value = ''; }
+    // Resetknop (Verbeterd)
+    document.getElementById('clearBtn').onclick = () => {
+        if(confirm('Weet je zeker dat je het hele bord wilt wissen?')) {
+            remove(ref(db, `classes/${currentClass}/board`));
+        }
     };
 
+    // Afbeelding toevoegen
+    document.getElementById('addImgBtn').onclick = () => {
+        const url = document.getElementById('imgInput').value.trim();
+        if(url) { push(ref(db, `classes/${currentClass}/board`), { type: 'image', src: url, x: 200, y: 200, w: 200, h: 150 }); imgInput.value = ''; }
+    };
+
+    // Tekenen en Sync
     onValue(ref(db, `classes/${currentClass}/board`), snap => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         objects = snap.val() || {};
-        const isTrash = trashZone.classList.contains('active');
-        
+        statusLabel.textContent = `Klas: ${currentClass} | Items: ${snap.numChildren()}`;
+
         snap.forEach((child) => {
             const obj = child.val();
             const isSel = child.key === draggedId;
-            const color = (isSel && isTrash) ? "#ef4444" : (isSel ? "#a78bfa" : "#4b5563");
+            const color = isSel ? "#003082" : "#4b5563";
 
             if (obj.type === 'text') {
                 ctx.font = "bold 22px 'Segoe UI'"; 
                 ctx.fillStyle = color;
                 ctx.fillText(obj.text, obj.x, obj.y);
-                // Optioneel: toon selectie-indicator rond tekst
-                if(isSel) {
-                   ctx.strokeStyle = color; ctx.lineWidth = 1;
-                   const w = ctx.measureText(obj.text).width;
-                   ctx.strokeRect(obj.x - 5, obj.y - 25, w + 10, 30);
-                }
             } else if (obj.type === 'path' && obj.points) {
-                ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath();
+                ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath();
                 ctx.moveTo(obj.points[0].x, obj.points[0].y);
                 obj.points.forEach(p => ctx.lineTo(p.x, p.y));
                 ctx.stroke();
-                ctx.fillStyle = isSel ? color : "#d1d5db"; ctx.beginPath(); ctx.arc(obj.points[0].x, obj.points[0].y, 6, 0, Math.PI * 2); ctx.fill();
             } else if (obj.type === 'image') {
                 const img = new Image(); img.src = obj.src;
-                img.onload = () => {
-                    ctx.save();
-                    drawRoundedRect(obj.x, obj.y, obj.w, obj.h, 15);
-                    ctx.clip(); ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
-                    if (isSel) { ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.stroke(); }
-                    ctx.restore();
-                };
+                img.onload = () => ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
             }
         });
-        document.getElementById('status').textContent = `Klasse: ${currentClass} | Objecten: ${snap.numChildren()}`;
     });
-
-    document.getElementById('clearBtn').onclick = () => { if(confirm('Alles wissen?')) remove(ref(db, `classes/${currentClass}/board`)); };
 </script>
 </body>
 </html>
