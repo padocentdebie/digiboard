@@ -3,51 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digibord Pro - Live Sync</title>
+    <title>Digibord Pro - Zinsbouw v3</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; overflow: hidden; }
         #board-container { 
-            position: relative; width: 95vw; height: 70vh; 
-            background: #ffffff; margin: 20px auto; border: 2px solid #d1d5db; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1); touch-action: none; border-radius: 8px;
+            position: relative; width: 95vw; height: 75vh; 
+            background: white; margin: 10px auto; border: 2px solid #003082; 
+            border-radius: 8px; touch-action: none;
         }
-        canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-        
+        canvas { width: 100%; height: 100%; display: block; }
         .toolbar { 
-            display: flex; gap: 10px; justify-content: center; padding: 15px; 
-            background: #ffffff; border-top: 1px solid #ddd; position: fixed; bottom: 0; width: 100%; z-index: 100;
+            position: fixed; bottom: 0; width: 100%; background: white; 
+            padding: 15px; display: flex; gap: 10px; justify-content: center;
+            border-top: 2px solid #ddd; z-index: 100;
         }
-        
-        input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 250px; }
-        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; }
-        
+        input { padding: 10px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; color: white; }
         #addBtn { background: #003082; }
         #clearBtn { background: #d32f2f; }
-        #addBtn:hover { background: #00205b; }
-        #clearBtn:hover { background: #a12323; }
-
-        #status { position: absolute; top: 10px; right: 20px; background: rgba(255,255,255,0.9); padding: 5px 15px; border-radius: 20px; font-size: 12px; border: 1px solid #ddd; }
-        #trash-zone { position: absolute; top: 10px; left: 20px; width: 50px; height: 50px; background: #fee2e2; border: 2px dashed #f87171; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; opacity: 0.6; }
-        #trash-zone.active { transform: scale(1.2); background: #ef4444; opacity: 1; }
+        #status { 
+            position: absolute; top: 10px; right: 20px; padding: 5px 15px; 
+            border-radius: 20px; font-size: 12px; font-weight: bold;
+            background: #ffeeee; color: #d32f2f; border: 1px solid #d32f2f;
+        }
+        #status.online { background: #eeffee; color: #2e7d32; border: 1px solid #2e7d32; }
     </style>
 </head>
 <body>
 
 <div id="board-container">
     <canvas id="whiteboard" width="1200" height="800"></canvas>
-    <div id="status">Status: Initialiseren...</div>
-    <div id="trash-zone">🗑️</div>
+    <div id="status">Status: Offline / Verbinden...</div>
 </div>
 
 <div class="toolbar">
-    <input type="text" id="wordInput" placeholder="Typ tekst om toe te voegen...">
-    <button id="addBtn" class="btn">Voeg Tekst Toe</button>
-    <button id="clearBtn" class="btn">Wis Bord</button>
+    <input type="text" id="wordInput" placeholder="Typ tekst of zinsdeel...">
+    <button id="addBtn" class="btn">Toevoegen</button>
+    <button id="clearBtn" class="btn">Bord Wissen</button>
 </div>
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, onValue, push, remove, update, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getDatabase, ref, onValue, push, remove, update, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyA3_rzoZOWytlyAbYKKe_WuFlD8z2WvbX4",
@@ -64,15 +61,25 @@
     const canvas = document.getElementById('whiteboard');
     const ctx = canvas.getContext('2d');
     const statusLabel = document.getElementById('status');
-    const trashZone = document.getElementById('trash-zone');
+    const currentClass = "Alpha";
 
     let objects = {};
     let isDragging = false;
     let draggedId = null;
     let offsetX = 0, offsetY = 0;
-    const currentClass = "Alpha";
 
-    // Positie berekening
+    // --- VERBINDINGSTEST ---
+    const connectedRef = ref(db, ".info/connected");
+    onValue(connectedRef, (snap) => {
+        if (snap.val() === true) {
+            statusLabel.innerText = "Status: Systeem Online";
+            statusLabel.classList.add('online');
+        } else {
+            statusLabel.innerText = "Status: Offline / Verbinden...";
+            statusLabel.classList.remove('online');
+        }
+    });
+
     const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -83,99 +90,67 @@
         };
     };
 
-    // Interactie Start
     canvas.addEventListener('mousedown', (e) => {
         const { x, y } = getPos(e);
         const entries = Object.entries(objects).reverse();
-        
         for (const [id, obj] of entries) {
-            if (obj.type === 'text') {
-                ctx.font = "bold 24px Arial";
-                const w = ctx.measureText(obj.text).width;
-                if (x > obj.x && x < obj.x + w && y > obj.y - 24 && y < obj.y) {
-                    draggedId = id;
-                    isDragging = true;
-                    offsetX = x - obj.x;
-                    offsetY = y - obj.y;
-                    return;
-                }
+            ctx.font = "bold 24px Arial";
+            const w = ctx.measureText(obj.text).width;
+            if (x > obj.x && x < obj.x + w && y > obj.y - 24 && y < obj.y) {
+                draggedId = id;
+                isDragging = true;
+                offsetX = x - obj.x;
+                offsetY = y - obj.y;
+                return;
             }
         }
     });
 
-    // Bewegen
     window.addEventListener('mousemove', (e) => {
         if (!isDragging || !draggedId) return;
         const { x, y } = getPos(e);
-        
         update(ref(db, `classes/${currentClass}/board/${draggedId}`), {
             x: x - offsetX,
             y: y - offsetY
         });
-
-        // Prullenbak check
-        const tRect = trashZone.getBoundingClientRect();
-        const clientX = e.clientX;
-        const clientY = e.clientY;
-        trashZone.classList.toggle('active', clientX > tRect.left && clientX < tRect.right && clientY > tRect.top && clientY < tRect.bottom);
     });
 
-    // Loslaten
     window.addEventListener('mouseup', () => {
-        if (isDragging && draggedId && trashZone.classList.contains('active')) {
-            remove(ref(db, `classes/${currentClass}/board/${draggedId}`));
-        }
         isDragging = false;
         draggedId = null;
-        trashZone.classList.remove('active');
     });
 
-    // Tekst Toevoegen
     document.getElementById('addBtn').onclick = () => {
         const val = document.getElementById('wordInput').value.trim();
         if (val) {
             push(ref(db, `classes/${currentClass}/board`), {
-                type: 'text',
-                text: val,
-                x: 150,
-                y: 150
+                type: 'text', text: val, x: 100, y: 100
             });
             document.getElementById('wordInput').value = '';
         }
     };
 
-    // Reset Bord
     document.getElementById('clearBtn').onclick = () => {
-        if (confirm("Hele bord wissen voor iedereen?")) {
-            remove(ref(db, `classes/${currentClass}/board`));
-        }
+        if (confirm("Alles wissen?")) remove(ref(db, `classes/${currentClass}/board`));
     };
 
-    // Live Tekenen
+    // Realtime Sync
     onValue(ref(db, `classes/${currentClass}/board`), (snapshot) => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         objects = snapshot.val() || {};
-        statusLabel.innerText = `Verbonden | Items: ${snapshot.numChildren()}`;
-
+        
         snapshot.forEach((child) => {
             const obj = child.val();
             const isSelected = child.key === draggedId;
-
-            if (obj.type === 'text') {
-                ctx.font = "bold 24px Arial";
-                ctx.fillStyle = isSelected ? "#003082" : "#333";
-                ctx.fillText(obj.text, obj.x, obj.y);
-                
-                if (isSelected) {
-                    ctx.strokeStyle = "#003082";
-                    ctx.lineWidth = 1;
-                    const w = ctx.measureText(obj.text).width;
-                    ctx.strokeRect(obj.x - 5, obj.y - 30, w + 10, 40);
-                }
+            ctx.font = "bold 24px Arial";
+            ctx.fillStyle = isSelected ? "#003082" : "#333";
+            ctx.fillText(obj.text, obj.x, obj.y);
+            if (isSelected) {
+                ctx.strokeStyle = "#003082";
+                ctx.strokeRect(obj.x - 5, obj.y - 30, ctx.measureText(obj.text).width + 10, 40);
             }
         });
     });
-
 </script>
 </body>
 </html>
